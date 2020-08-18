@@ -1,129 +1,152 @@
 // Importing external packages -Common JS
 const express = require("express");
 const bodyParser = require("body-parser");
-const fs = require("fs");
-const { response } = require("express");
+const cors = require("cors");
+const DAL = require("./DAL");
+const { ObjectId, ObjectID } = require("mongodb");
+DAL.connect();
 
 //Creating server
 const app = express();
+
+//Installing the CORS middleware
+// allows us (the server) to respond to requests from a different origin (URL)
+
+app.use(cors());
 
 // Installing the body-parser middleware
 // Allow us to read JSON from requests
 
 app.use(bodyParser.json());
 
-// Read in JSON File (mock Database)
-let products = [];
-
-try {
-  products = JSON.parse(fs.readFileSync("products.json")).products;
-} catch (error) {
-  console.log("No exisiting file.");
-}
-
 //get all
 //GET
-app.get("/api/products", (req, res) => {
+app.get("/api/products", async (req, res) => {
+  const products = await DAL.findAll();
+
   res.send(products);
 });
 
 // get a specific product by id
 // GET api/products/(id)
-app.get("/api/products/:id", (req, res) => {
-  const productId = Number(req.params.id);
+app.get("/api/products/:id", async (req, res) => {
+  const productId = req.params.id;
 
-  const product = products.find((p) => {
-    if (productId === p.id) {
-      return true;
-    }
-  });
-
-  if (!product) {
-    res.send(`Product with id ${productId} not found - 404`);
+  if (!ObjectID.isValid(productId)) {
+    res
+      .status(400)
+      .send(
+        `ProductID ${productId} is incorrect. ID must be 25 characters long.`
+      );
     return;
   }
 
+  const productQuery = {
+    _id: new ObjectId(productId),
+  };
+  let product;
+
+  try {
+    product = await DAL.findOne(productQuery);
+  } catch (error) {
+    res.status(404).send(`Product with id ${productId} not found!`);
+    return;
+  }
   res.send(product);
 });
 
 //Create a new product
 //POST
-app.post("/api/products", (req, res) => {
+app.post("/api/products", async (req, res) => {
   const body = req.body;
-  if (!body.id || !body.name || !body.price) {
-    res.send("Bad Request. Validation Error. Missing id, name or price");
+  if (!body.name || !body.price || !body.category) {
+    res
+      .status(400)
+      .send("Bad Request. Validation Error. Missing name, price, or category!");
     return;
   }
-  products.push(body);
-  const jsonPayload = {
-    products: products,
-  };
-  fs.writeFileSync("products.json", JSON.stringify(jsonPayload));
-  res.send("Item added Successfully!");
+
+  //Validate data types of properties
+  // name = non-empty string
+  // price = number > 0
+  // category = non-empty string
+
+  if (body.name && typeof body.name !== "string") {
+    res.status(400).send("The name parameter must be a type of string.");
+    return;
+  }
+
+  if (body.name && typeof body.category !== "string") {
+    res.status(400).send("The category parameter must be a type of string.");
+    return;
+  }
+
+  if (body.price && isNaN(Number(body.price))) {
+    res
+      .status(400)
+      .send("The price parameter must be a number and greater than 0");
+    return;
+  }
+
+  await DAL.insertOne(body);
+
+  res.status(201).send("Item added Successfully!");
 });
 
 //Update existing product
 //PUT
-app.put("/api/products/:id", (req, res) => {
-  const productId = Number(req.params.id);
+app.put("/api/products/:id", async (req, res) => {
+  const productId = req.params.id;
+  const body = req.body;
 
-  const product = products.find((p) => {
-    return productId === p.id;
-  });
-
-  if (!product) {
-    res.send(`Product with id ${productId} not found -404`);
+  if (!ObjectID.isValid(productId)) {
+    res
+      .status(400)
+      .send(
+        `ProductID ${productId} is incorrect. ID must be 25 characters long.`
+      );
     return;
   }
 
-  const body = req.body;
-
-  if (body.name || body.price) {
-    product.name = body.name;
-    product.price = body.price;
-  }
-  const jsonPayload = {
-    products: products,
+  const productQuery = {
+    _id: new ObjectId(productId),
   };
-  fs.writeFileSync("products.json", JSON.stringify(jsonPayload));
+
+  try {
+    await DAL.updateOne(productQuery, body);
+  } catch (error) {
+    res.status(404).send(`Product with id ${productId} not found!`);
+    return;
+  }
 
   res.send("Good to Go!");
-
-  /*
-  if (body.name) {
-    product.name = body.name;
-  }
-  if (body.price) {
-    product.price = body.price;
-  }
-  const jsonPayload = {
-    products: products,
-  };
-  fs.writeFileSync("products.json", JSON.stringify(jsonPayload));
-
-  res.send("All Done!");
-  */
 });
 
 //Delete a product
 //DELETE
-app.delete("/api/products/:id", (req, res) => {
-  const productId = Number(req.params.id);
+app.delete("/api/products/:id", async (req, res) => {
+  const productId = req.params.id;
 
-  const productIndex = products.findIndex((p) => {
-    return productId === p.id;
-  });
-
-  if (productIndex === -1) {
-    res.send(`Product with ID ${productId} not found -404`);
+  if (!ObjectID.isValid(productId)) {
+    res
+      .status(400)
+      .send(
+        `ProductID ${productId} is incorrect. ID must be 25 characters long.`
+      );
+    return;
   }
 
-  products.splice(productIndex, 1);
-
-  const jsonPayload = {
-    products: products,
+  const productQuery = {
+    _id: new ObjectId(productId),
   };
-  fs.writeFileSync("products.json", JSON.stringify(jsonPayload));
+
+  try {
+    await DAL.deleteOne(productQuery);
+  } catch (error) {
+    res.status(404).send(`Product with id ${productId} not found!`);
+    return;
+  }
+
   res.send(`Item with ID ${productId} has been deleted.`);
 });
 
@@ -132,7 +155,7 @@ app.delete("/api/products/:id", (req, res) => {
 // Routes
 
 // Starting my server
-const port = process.env.PORT ? process.env.PORT : 3000;
+const port = process.env.PORT ? process.env.PORT : 3005;
 app.listen(port, () => {
   console.log("Grocery API Server has started!");
 });
